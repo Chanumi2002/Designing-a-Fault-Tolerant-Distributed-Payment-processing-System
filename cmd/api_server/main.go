@@ -5,9 +5,16 @@ import (
 	"net/http"
 
 	"distributed_payment_system/internal/api"
+	"distributed_payment_system/internal/utils"
 )
 
 func main() {
+	file, err := utils.SetupGlobalFileLogger("api_server.log")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer file.Close()
+
 	mux := http.NewServeMux()
 
 	handler := api.NewHandler()

@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,11 +14,12 @@ import (
 )
 
 type NodeView struct {
-	ID         string `json:"id"`
-	Role       string `json:"role"`
-	Status     string `json:"status"`
-	Port       int    `json:"port"`
-	LastAction string `json:"lastAction"`
+	ID          string `json:"id"`
+	Role        string `json:"role"`
+	Status      string `json:"status"`
+	Port        int    `json:"port"`
+	LastAction  string `json:"lastAction"`
+	CurrentTerm int    `json:"currentTerm"`
 }
 
 type LogView struct {
@@ -54,6 +56,7 @@ type ActionResponse struct {
 type State struct {
 	mu            sync.RWMutex
 	leader        string
+	currentTerm   int
 	nodes         []NodeView
 	payments      []*types.PaymentEntry
 	logs          []LogView
@@ -72,11 +75,12 @@ func NewHandler() *Handler {
 
 func newState() *State {
 	s := &State{
-		leader: "node1",
+		leader:      "node1",
+		currentTerm: 0,
 		nodes: []NodeView{
-			{ID: "node1", Role: "Leader", Status: "Running", Port: 8001, LastAction: "Cluster initialized"},
-			{ID: "node2", Role: "Follower", Status: "Running", Port: 8002, LastAction: "Waiting for leader"},
-			{ID: "node3", Role: "Follower", Status: "Running", Port: 8003, LastAction: "Waiting for leader"},
+			{ID: "node1", Role: "Leader", Status: "Running", Port: 8001, LastAction: "Cluster initialized", CurrentTerm: 0},
+			{ID: "node2", Role: "Follower", Status: "Running", Port: 8002, LastAction: "Waiting for leader", CurrentTerm: 0},
+			{ID: "node3", Role: "Follower", Status: "Running", Port: 8003, LastAction: "Waiting for leader", CurrentTerm: 0},
 		},
 		payments:      []*types.PaymentEntry{},
 		logs:          []LogView{},
@@ -84,7 +88,7 @@ func newState() *State {
 	}
 
 	s.addLog("Dashboard API server started")
-	s.addLog("Node1 is the current leader")
+	s.addLog("Node1 is the current leader in term 0")
 	return s
 }
 
@@ -120,8 +124,9 @@ func (h *Handler) GetLeader(w http.ResponseWriter, r *http.Request) {
 	h.state.mu.RLock()
 	defer h.state.mu.RUnlock()
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"leader": h.state.leader,
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"leader":      h.state.leader,
+		"currentTerm": h.state.currentTerm,
 	})
 }
 
@@ -226,7 +231,7 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 
 	h.state.payments = append(h.state.payments, payment)
 	h.state.setLeaderAction("Created "+req.TransactionID, "Replicated "+req.TransactionID)
-	h.state.addLog(strings.ToUpper(h.state.leader) + " created payment " + req.TransactionID)
+	h.state.addLog(strings.ToUpper(h.state.leader) + " created payment " + req.TransactionID + " in term " + strconv.Itoa(h.state.currentTerm))
 	h.state.addLog("Followers replicated " + req.TransactionID)
 	h.state.addLog("Majority ACK received, " + req.TransactionID + " committed")
 
@@ -296,7 +301,7 @@ func (h *Handler) FailNode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.state.addLog(strings.ToUpper(nextLeader) + " became the new leader")
+		h.state.addLog(strings.ToUpper(nextLeader) + " became the new leader in term " + strconv.Itoa(h.state.currentTerm))
 		writeJSON(w, http.StatusOK, ActionResponse{
 			Success: true,
 			Message: nodeID + " failed, " + nextLeader + " is now leader",
@@ -355,6 +360,7 @@ func (h *Handler) RejoinNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	node.Status = "Running"
+	node.CurrentTerm = h.state.currentTerm
 	if h.state.leader == nodeID {
 		node.Role = "Leader"
 	} else {
@@ -363,7 +369,7 @@ func (h *Handler) RejoinNode(w http.ResponseWriter, r *http.Request) {
 	node.LastAction = "Recovered missing transactions"
 
 	h.state.recoveryState = "Recovered"
-	h.state.addLog(strings.ToUpper(nodeID) + " rejoined the cluster")
+	h.state.addLog(strings.ToUpper(nodeID) + " rejoined the cluster in term " + strconv.Itoa(h.state.currentTerm))
 	h.state.addLog("Recovery request sent for " + nodeID)
 
 	if len(h.state.payments) == 0 {
@@ -381,6 +387,8 @@ func (h *Handler) RejoinNode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *State) addLog(message string) {
+	log.Println(message)
+
 	s.logs = append(s.logs, LogView{
 		Time:    time.Now().Format("15:04:05"),
 		Message: message,
@@ -438,10 +446,12 @@ func (s *State) setLeaderAction(leaderAction, followerAction string) {
 			s.nodes[i].LastAction = leaderAction
 			s.nodes[i].Role = "Leader"
 			s.nodes[i].Status = "Running"
+			s.nodes[i].CurrentTerm = s.currentTerm
 		default:
 			if s.nodes[i].Status == "Running" {
 				s.nodes[i].Role = "Follower"
 				s.nodes[i].LastAction = followerAction
+				s.nodes[i].CurrentTerm = s.currentTerm
 			}
 		}
 	}
@@ -453,6 +463,7 @@ func (s *State) markNodeFailed(nodeID string) {
 			s.nodes[i].Status = "Failed"
 			s.nodes[i].Role = "Failed"
 			s.nodes[i].LastAction = "Node unavailable"
+			s.nodes[i].CurrentTerm = s.currentTerm
 			break
 		}
 	}
@@ -465,6 +476,8 @@ func (s *State) markNodeFailed(nodeID string) {
 func (s *State) promoteNextLeader(excluding string) (string, error) {
 	order := []string{"node1", "node2", "node3"}
 
+	s.currentTerm++
+
 	for _, id := range order {
 		if id == excluding {
 			continue
@@ -475,10 +488,14 @@ func (s *State) promoteNextLeader(excluding string) (string, error) {
 				s.leader = id
 				s.nodes[i].Role = "Leader"
 				s.nodes[i].LastAction = "Took over leadership"
+				s.nodes[i].CurrentTerm = s.currentTerm
 
 				for j := range s.nodes {
-					if s.nodes[j].ID != id && s.nodes[j].Status == "Running" {
-						s.nodes[j].Role = "Follower"
+					if s.nodes[j].ID != id {
+						s.nodes[j].CurrentTerm = s.currentTerm
+						if s.nodes[j].Status == "Running" {
+							s.nodes[j].Role = "Follower"
+						}
 					}
 				}
 

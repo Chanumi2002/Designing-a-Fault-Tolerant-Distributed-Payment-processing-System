@@ -1,0 +1,9 @@
+2026/03/28 23:21:50 API server running at http://localhost:8080
+2026/03/28 23:21:50 Open http://localhost:8080/index.html
+2026/03/28 23:35:24 Dashboard API server started
+2026/03/28 23:35:24 Node1 is the current leader
+2026/03/28 23:35:24 API server running at http://localhost:8080
+2026/03/28 23:35:24 Open http://localhost:8080/index.html
+2026/03/28 23:35:38 NODE1 created payment txn9500
+2026/03/28 23:35:38 Followers replicated txn9500
+2026/03/28 23:35:38 Majority ACK received, txn9500 committed

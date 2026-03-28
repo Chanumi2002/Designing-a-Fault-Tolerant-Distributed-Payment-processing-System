@@ -1,0 +1,31 @@
+2026/03/28 23:56:41 Dashboard API server started
+2026/03/28 23:56:41 Node1 is the current leader
+2026/03/28 23:56:41 API server running at http://localhost:8080
+2026/03/28 23:56:41 Open http://localhost:8080/index.html
+2026/03/28 23:56:53 NODE1 created payment txn9500
+2026/03/28 23:56:53 Followers replicated txn9500
+2026/03/28 23:56:53 Majority ACK received, txn9500 committed
+2026/03/29 00:11:14 Dashboard API server started
+2026/03/29 00:11:14 Node1 is the current leader in term 0
+2026/03/29 00:11:14 API server running at http://localhost:8080
+2026/03/29 00:11:14 Open http://localhost:8080/index.html
+2026/03/29 00:11:35 NODE1 created payment txn9500 in term 0
+2026/03/29 00:11:35 Followers replicated txn9500
+2026/03/29 00:11:35 Majority ACK received, txn9500 committed
+2026/03/29 00:11:56 NODE1 created payment txn9501 in term 0
+2026/03/29 00:11:56 Followers replicated txn9501
+2026/03/29 00:11:56 Majority ACK received, txn9501 committed
+2026/03/29 00:13:10 NODE1 failed
+2026/03/29 00:13:10 NODE1 was leader, triggering failover
+2026/03/29 00:13:10 NODE2 became the new leader in term 1
+2026/03/29 00:13:20 NODE1 rejoined the cluster in term 1
+2026/03/29 00:13:20 Recovery request sent for node1
+2026/03/29 00:13:20 Recovery applied for txn9500 on node1
+2026/03/29 00:13:20 Recovery applied for txn9501 on node1
+2026/03/29 00:18:01 Dashboard API server started
+2026/03/29 00:18:01 Node1 is the current leader in term 0
+2026/03/29 00:18:01 API server running at http://localhost:8080
+2026/03/29 00:18:01 Open http://localhost:8080/index.html
+2026/03/29 00:18:20 NODE1 created payment txn9503 in term 0
+2026/03/29 00:18:20 Followers replicated txn9503
+2026/03/29 00:18:20 Majority ACK received, txn9503 committed

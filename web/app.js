@@ -22,6 +22,12 @@ const nodeStatus = {
   node3: document.getElementById("node3Status"),
 };
 
+const nodeTerm = {
+  node1: document.getElementById("node1Term"),
+  node2: document.getElementById("node2Term"),
+  node3: document.getElementById("node3Term"),
+};
+
 const nodeAction = {
   node1: document.getElementById("node1Action"),
   node2: document.getElementById("node2Action"),
@@ -50,6 +56,10 @@ function renderNodes(nodes, leader) {
     nodeStatus[node.id].textContent = node.status;
     nodeAction[node.id].textContent = node.lastAction;
     nodeRoles[node.id].textContent = node.role;
+
+    if (nodeTerm[node.id]) {
+      nodeTerm[node.id].textContent = node.currentTerm ?? 0;
+    }
 
     if (node.status === "Failed") {
       nodeCards[node.id].classList.add("failed");
