@@ -108,13 +108,6 @@ func main() {
 		}
 	}()
 
-	go func() {
-		for {
-			time.Sleep(5 * time.Second)
-			detector.PrintStatuses()
-		}
-	}()
-
 	log.Printf("===== %s START =====", strings.ToUpper(node.ID))
 	log.Printf("node %s started on %s as %s\n", node.ID, address, node.Role)
 	log.Printf("node %s writing logs to log/%s.log\n", node.ID, node.ID)

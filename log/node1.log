@@ -1,1 +1,8 @@
-
+2026/03/29 01:10:22 UDP server listening on 127.0.0.1:8001
+2026/03/29 01:10:22 ===== NODE1 START =====
+2026/03/29 01:10:22 node node1 started on 127.0.0.1:8001 as leader
+2026/03/29 01:10:22 node node1 writing logs to log/node1.log
+2026/03/29 01:11:09 UDP server listening on 127.0.0.1:8001
+2026/03/29 01:11:09 ===== NODE1 START =====
+2026/03/29 01:11:09 node node1 started on 127.0.0.1:8001 as leader
+2026/03/29 01:11:09 node node1 writing logs to log/node1.log

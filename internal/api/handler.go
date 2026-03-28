@@ -11,7 +11,10 @@ import (
 	"time"
 
 	"distributed_payment_system/internal/types"
+	"distributed_payment_system/internal/utils"
 )
+
+const apiServerLogFile = "api_server.log"
 
 type NodeView struct {
 	ID          string `json:"id"`
@@ -74,6 +77,8 @@ func NewHandler() *Handler {
 }
 
 func newState() *State {
+	existingLogs := loadExistingDashboardLogs()
+
 	s := &State{
 		leader:      "node1",
 		currentTerm: 0,
@@ -83,13 +88,30 @@ func newState() *State {
 			{ID: "node3", Role: "Follower", Status: "Running", Port: 8003, LastAction: "Waiting for leader", CurrentTerm: 0},
 		},
 		payments:      []*types.PaymentEntry{},
-		logs:          []LogView{},
+		logs:          existingLogs,
 		recoveryState: "Stable",
 	}
 
 	s.addLog("Dashboard API server started")
 	s.addLog("Node1 is the current leader in term 0")
 	return s
+}
+
+func loadExistingDashboardLogs() []LogView {
+	storedLogs, err := utils.ReadPersistedLogs(apiServerLogFile, 200)
+	if err != nil {
+		return []LogView{}
+	}
+
+	logs := make([]LogView, 0, len(storedLogs))
+	for _, entry := range storedLogs {
+		logs = append(logs, LogView{
+			Time:    entry.Time,
+			Message: entry.Message,
+		})
+	}
+
+	return logs
 }
 
 func (h *Handler) GetDashboard(w http.ResponseWriter, r *http.Request) {
@@ -491,11 +513,9 @@ func (s *State) promoteNextLeader(excluding string) (string, error) {
 				s.nodes[i].CurrentTerm = s.currentTerm
 
 				for j := range s.nodes {
-					if s.nodes[j].ID != id {
+					if s.nodes[j].ID != id && s.nodes[j].Status == "Running" {
 						s.nodes[j].CurrentTerm = s.currentTerm
-						if s.nodes[j].Status == "Running" {
-							s.nodes[j].Role = "Follower"
-						}
+						s.nodes[j].Role = "Follower"
 					}
 				}
 
