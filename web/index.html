@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Distributed Payment System Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div>
+        <h1>Distributed Payment System Dashboard</h1>
+        <p class="subtitle">Fault Tolerance • Replication • Consensus • Time Synchronization</p>
+      </div>
+      <div class="leader-box">
+        <span class="leader-label">Current Leader</span>
+        <span id="currentLeader" class="leader-value">NONE</span>
+      </div>
+    </header>
+
+    <section class="grid top-grid">
+      <div class="card node-card follower" id="node1Card">
+        <div class="card-head">
+          <h2>Node 1</h2>
+          <span class="badge follower-badge" id="node1Role">Follower</span>
+        </div>
+        <p>Status: <span id="node1Status">Running</span></p>
+        <p>Port: 8001</p>
+        <p>Last Action: <span id="node1Action">Waiting for leader</span></p>
+        <div class="node-actions">
+          <button class="secondary-btn node-action-btn fail-btn" type="button" data-action="fail" data-node-id="node1">Fail Node 1</button>
+          <button class="secondary-btn node-action-btn rejoin-btn" type="button" data-action="rejoin" data-node-id="node1">Rejoin Node 1</button>
+        </div>
+      </div>
+
+      <div class="card node-card follower" id="node2Card">
+        <div class="card-head">
+          <h2>Node 2</h2>
+          <span class="badge follower-badge" id="node2Role">Follower</span>
+        </div>
+        <p>Status: <span id="node2Status">Running</span></p>
+        <p>Port: 8002</p>
+        <p>Last Action: <span id="node2Action">Waiting for leader</span></p>
+        <div class="node-actions">
+          <button class="secondary-btn node-action-btn fail-btn" type="button" data-action="fail" data-node-id="node2">Fail Node 2</button>
+          <button class="secondary-btn node-action-btn rejoin-btn" type="button" data-action="rejoin" data-node-id="node2">Rejoin Node 2</button>
+        </div>
+      </div>
+
+      <div class="card node-card follower" id="node3Card">
+        <div class="card-head">
+          <h2>Node 3</h2>
+          <span class="badge follower-badge" id="node3Role">Follower</span>
+        </div>
+        <p>Status: <span id="node3Status">Running</span></p>
+        <p>Port: 8003</p>
+        <p>Last Action: <span id="node3Action">Waiting for leader</span></p>
+        <div class="node-actions">
+          <button class="secondary-btn node-action-btn fail-btn" type="button" data-action="fail" data-node-id="node3">Fail Node 3</button>
+          <button class="secondary-btn node-action-btn rejoin-btn" type="button" data-action="rejoin" data-node-id="node3">Rejoin Node 3</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid middle-grid">
+      <div class="card">
+        <div class="card-head">
+          <h2>Create Payment</h2>
+          <span class="badge info-badge">Demo Form</span>
+        </div>
+
+        <form id="paymentForm" class="payment-form">
+          <label>
+            Transaction ID
+            <input type="text" id="transactionId" placeholder="txn9003" required />
+          </label>
+
+          <label>
+            Amount
+            <input type="number" id="amount" placeholder="500" step="0.01" required />
+          </label>
+
+          <label>
+            Owner ID
+            <input type="text" id="ownerId" placeholder="user9003" required />
+          </label>
+
+          <button type="submit" class="primary-btn">Create Payment</button>
+        </form>
+
+        <p id="formMessage" class="form-message"></p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>System Summary</h2>
+          <span class="badge success-badge">Live View</span>
+        </div>
+
+        <div class="stats">
+          <div class="stat-box">
+            <span class="stat-title">Nodes Active</span>
+            <span class="stat-value" id="nodesActive">3 / 3</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-title">Committed Payments</span>
+            <span class="stat-value" id="committedCount">0</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-title">Pending Payments</span>
+            <span class="stat-value" id="pendingCount">0</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-title">Recovery State</span>
+            <span class="stat-value" id="recoveryState">Stable</span>
+          </div>
+        </div>
+
+        <div class="controls" style="margin-top:12px;">
+          <button class="secondary-btn" id="refreshBtn" type="button">Refresh Dashboard</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid bottom-grid">
+      <div class="card">
+        <div class="card-head">
+          <h2>Replicated Payments</h2>
+          <span class="badge info-badge">Ledger View</span>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Transaction ID</th>
+                <th>Amount</th>
+                <th>Owner</th>
+                <th>Status</th>
+                <th>Version</th>
+              </tr>
+            </thead>
+            <tbody id="paymentsTable">
+              <tr>
+                <td colspan="5">No payments yet</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card log-card">
+        <div class="card-head">
+          <h2>Live Event Logs</h2>
+          <span class="badge warning-badge">Ordered Logs</span>
+        </div>
+
+        <div id="logsPanel" class="logs-panel">
+          <div class="log-line">No logs yet</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
