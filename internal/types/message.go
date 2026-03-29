@@ -5,23 +5,22 @@ import (
 	"time"
 )
 
-
-
 const (
-	MsgHeartbeat       = "HB"
-	MsgReplicate       = "REPLICATE"
-	MsgSyncClock       = "SYNC"
-	MsgVoteReq         = "VOTE_REQ"
-	MsgVoteReply       = "VOTE_REPLY"
-	MsgLeaderHB        = "LEADER_HB"
-	MsgAck             = "ACK"
-	MsgRecoveryRequest = "RECOVERY_REQ"
-	MsgRecoveryData    = "RECOVERY_DATA"
-
-	MsgPaymentCreate   = "PAYMENT_CREATE"
+	MsgHeartbeat        = "HB"
+	MsgReplicate        = "REPLICATE"
+	MsgSyncClock        = "SYNC"
+	MsgVoteReq          = "VOTE_REQ"
+	MsgVoteReply        = "VOTE_REPLY"
+	MsgLeaderHB         = "LEADER_HB"
+	MsgAck              = "ACK"
+	MsgRecoveryRequest  = "RECOVERY_REQ"
+	MsgRecoveryData     = "RECOVERY_DATA"
+	MsgPaymentCreate    = "PAYMENT_CREATE"
 	MsgPaymentReplicate = "PAYMENT_REPLICATE"
-	MsgPaymentAck      = "PAYMENT_ACK"
+	MsgPaymentAck       = "PAYMENT_ACK"
+	MsgPaymentCommit    = "PAYMENT_COMMIT"
 )
+
 type Message struct {
 	Type    string                 `json:"type"`
 	Sender  string                 `json:"sender"`

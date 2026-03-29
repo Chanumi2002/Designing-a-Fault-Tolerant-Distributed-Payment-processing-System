@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"distributed_payment_system/internal/transport"
 	"distributed_payment_system/internal/types"
 	"distributed_payment_system/internal/utils"
 )
@@ -238,6 +239,40 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+
+	leaderNode := h.state.findNode(h.state.leader)
+	if leaderNode == nil {
+		writeJSON(w, http.StatusConflict, ActionResponse{
+			Success: false,
+			Message: "leader node not found",
+		})
+		return
+	}
+
+	payload := map[string]interface{}{
+		"transaction_id": req.TransactionID,
+		"amount":         req.Amount,
+		"owner_id":       req.OwnerID,
+	}
+
+	data, err := types.NewMessage(types.MsgPaymentCreate, "api_server", payload)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, ActionResponse{
+			Success: false,
+			Message: "failed to build payment message",
+		})
+		return
+	}
+
+	client := transport.NewUDPClient()
+	leaderAddr := "127.0.0.1:" + strconv.Itoa(leaderNode.Port)
+	if err := client.Send(leaderAddr, data); err != nil {
+		writeJSON(w, http.StatusBadGateway, ActionResponse{
+			Success: false,
+			Message: "failed to send payment to leader",
+		})
+		return
 	}
 
 	payment := &types.PaymentEntry{

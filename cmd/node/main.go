@@ -10,10 +10,61 @@ import (
 
 	"distributed_payment_system/internal/config"
 	"distributed_payment_system/internal/fault"
+	"distributed_payment_system/internal/replication"
 	"distributed_payment_system/internal/transport"
 	"distributed_payment_system/internal/types"
 	"distributed_payment_system/internal/utils"
 )
+
+type nodeStore struct {
+	node *types.Node
+}
+
+func (s *nodeStore) HasPayment(transactionID string) bool {
+	s.node.Mu.RLock()
+	defer s.node.Mu.RUnlock()
+
+	_, ok := s.node.Payments[transactionID]
+	return ok
+}
+
+func (s *nodeStore) SavePayment(payment *types.PaymentEntry) error {
+	if payment == nil || payment.TransactionID == "" {
+		return nil
+	}
+
+	s.node.Mu.Lock()
+	defer s.node.Mu.Unlock()
+
+	cp := *payment
+	s.node.Payments[payment.TransactionID] = &cp
+	return nil
+}
+
+func (s *nodeStore) GetPayment(transactionID string) (*types.PaymentEntry, bool) {
+	s.node.Mu.RLock()
+	defer s.node.Mu.RUnlock()
+
+	p, ok := s.node.Payments[transactionID]
+	if !ok {
+		return nil, false
+	}
+
+	cp := *p
+	return &cp, true
+}
+
+func (s *nodeStore) GetAllPayments() []*types.PaymentEntry {
+	s.node.Mu.RLock()
+	defer s.node.Mu.RUnlock()
+
+	result := make([]*types.PaymentEntry, 0, len(s.node.Payments))
+	for _, p := range s.node.Payments {
+		cp := *p
+		result = append(result, &cp)
+	}
+	return result
+}
 
 func main() {
 	cfg := config.Load()
@@ -40,34 +91,14 @@ func main() {
 	if node.ID == "node1" {
 		node.Role = types.RoleLeader
 		node.KnownLeader = node.ID
-
-		node.Payments["txn1001"] = &types.PaymentEntry{
-			TransactionID: "txn1001",
-			Amount:        120.50,
-			Currency:      "USD",
-			Status:        "completed",
-			Timestamp:     float64(time.Now().UnixNano()) / 1e9,
-			Version:       1,
-			OwnerID:       "user1",
-			StripeID:      "stripe_001",
-		}
-
-		node.Payments["txn1002"] = &types.PaymentEntry{
-			TransactionID: "txn1002",
-			Amount:        75.00,
-			Currency:      "USD",
-			Status:        "completed",
-			Timestamp:     float64(time.Now().UnixNano()) / 1e9,
-			Version:       1,
-			OwnerID:       "user2",
-			StripeID:      "stripe_002",
-		}
 	} else {
 		node.Role = types.RoleFollower
 		node.KnownLeader = "node1"
 	}
 
 	client := transport.NewUDPClient()
+	store := &nodeStore{node: node}
+	replicationService := replication.NewService(store, node, cfg, client)
 	detector := fault.NewDetector(node, cfg, client)
 	recovery := fault.NewRecoveryManager(node, cfg, client)
 
@@ -77,6 +108,46 @@ func main() {
 		switch msg.Type {
 		case types.MsgHeartbeat:
 			detector.HandleHeartbeat(msg)
+
+		case types.MsgPaymentCreate:
+			if node.Role == types.RoleLeader {
+				transactionID, _ := msg.Payload["transaction_id"].(string)
+				ownerID, _ := msg.Payload["owner_id"].(string)
+				amount, _ := msg.Payload["amount"].(float64)
+
+				payment, err := replicationService.CreatePayment(transactionID, amount, ownerID)
+				if err != nil || payment == nil {
+					return
+				}
+
+				go func(txn string) {
+					timeout := time.After(5 * time.Second)
+					ticker := time.NewTicker(100 * time.Millisecond)
+					defer ticker.Stop()
+
+					for {
+						select {
+						case <-timeout:
+							return
+						case <-ticker.C:
+							if replicationService.HasMajority(txn) {
+								replicationService.MarkCommitted(txn)
+								_ = replicationService.BroadcastCommit(txn)
+								return
+							}
+						}
+					}
+				}(payment.TransactionID)
+			}
+
+		case types.MsgPaymentReplicate:
+			_ = replicationService.HandleReplicatedPayment(msg)
+
+		case types.MsgPaymentAck:
+			replicationService.HandlePaymentAck(msg)
+
+		case types.MsgPaymentCommit:
+			_ = replicationService.HandleCommitPayment(msg)
 
 		case types.MsgRecoveryRequest:
 			if node.Role == types.RoleLeader {
@@ -89,7 +160,6 @@ func main() {
 			recovery.HandleRecoveryData(msg)
 
 		default:
-			log.Printf("node %s received message type %s from %s\n", node.ID, msg.Type, msg.Sender)
 		}
 	})
 

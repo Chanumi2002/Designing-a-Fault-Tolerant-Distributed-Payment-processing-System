@@ -2,6 +2,7 @@ package replication
 
 import (
 	"errors"
+	"log"
 	"net"
 	"strconv"
 	"sync"
@@ -62,9 +63,13 @@ func (s *Service) CreatePayment(transactionID string, amount float64, ownerID st
 	s.acks[transactionID] = 1
 	s.ackMu.Unlock()
 
+	log.Printf("node %s created payment %s", s.node.ID, transactionID)
+
 	if err := s.ReplicatePaymentToFollowers(payment); err != nil {
 		return nil, err
 	}
+
+	log.Printf("node %s replicated payment %s to followers", s.node.ID, transactionID)
 
 	return payment, nil
 }
@@ -134,6 +139,8 @@ func (s *Service) HandleReplicatedPayment(msg *types.Message) error {
 		}
 	}
 
+	log.Printf("node %s replicated payment %s", s.node.ID, transactionID)
+
 	payload := map[string]interface{}{
 		"transaction_id": transactionID,
 	}
@@ -190,6 +197,83 @@ func (s *Service) MarkCommitted(transactionID string) {
 
 	payment.Status = "committed"
 	_ = s.store.SavePayment(payment)
+
+	log.Printf("node %s committed payment %s", s.node.ID, transactionID)
+}
+
+func (s *Service) BroadcastCommit(transactionID string) error {
+	payment, ok := s.store.GetPayment(transactionID)
+	if !ok {
+		return nil
+	}
+
+	peers := s.config.PeersExcluding(s.node.ID)
+
+	for _, peer := range peers {
+		payload := map[string]interface{}{
+			"transaction_id": payment.TransactionID,
+			"amount":         payment.Amount,
+			"currency":       payment.Currency,
+			"status":         "committed",
+			"timestamp":      payment.Timestamp,
+			"version":        payment.Version,
+			"owner_id":       payment.OwnerID,
+			"stripe_id":      payment.StripeID,
+		}
+
+		data, err := types.NewMessage(types.MsgPaymentCommit, s.node.ID, payload)
+		if err != nil {
+			continue
+		}
+
+		addr := net.JoinHostPort(peer.Host, strconv.Itoa(peer.Port))
+		_ = s.sender.Send(addr, data)
+	}
+
+	return nil
+}
+
+func (s *Service) HandleCommitPayment(msg *types.Message) error {
+	if msg == nil {
+		return nil
+	}
+
+	transactionID, _ := msg.Payload["transaction_id"].(string)
+	if transactionID == "" {
+		return nil
+	}
+
+	payment, ok := s.store.GetPayment(transactionID)
+	if !ok {
+		currency, _ := msg.Payload["currency"].(string)
+		status, _ := msg.Payload["status"].(string)
+		ownerID, _ := msg.Payload["owner_id"].(string)
+		stripeID, _ := msg.Payload["stripe_id"].(string)
+		amount, _ := msg.Payload["amount"].(float64)
+		timestamp, _ := msg.Payload["timestamp"].(float64)
+		versionFloat, _ := msg.Payload["version"].(float64)
+		version := int(versionFloat)
+
+		payment = &types.PaymentEntry{
+			TransactionID: transactionID,
+			Amount:        amount,
+			Currency:      currency,
+			Status:        status,
+			Timestamp:     timestamp,
+			Version:       version,
+			OwnerID:       ownerID,
+			StripeID:      stripeID,
+		}
+	} else {
+		payment.Status = "committed"
+	}
+
+	if err := s.store.SavePayment(payment); err != nil {
+		return err
+	}
+
+	log.Printf("node %s committed replicated payment %s", s.node.ID, transactionID)
+	return nil
 }
 
 func (s *Service) GetPayment(transactionID string) (*types.PaymentEntry, bool) {
@@ -200,8 +284,6 @@ func (s *Service) GetAllPayments() []*types.PaymentEntry {
 	return s.store.GetAllPayments()
 }
 
-// ApplyRecoveredPayment stores a recovered payment locally without sending ACK.
-// Used when a failed node rejoins and receives ledger data from the current leader.
 func (s *Service) ApplyRecoveredPayment(payment *types.PaymentEntry) error {
 	if payment == nil || payment.TransactionID == "" {
 		return nil
