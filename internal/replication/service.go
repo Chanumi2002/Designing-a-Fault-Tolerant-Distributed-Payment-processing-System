@@ -63,13 +63,9 @@ func (s *Service) CreatePayment(transactionID string, amount float64, ownerID st
 	s.acks[transactionID] = 1
 	s.ackMu.Unlock()
 
-	log.Printf("node %s created payment %s", s.node.ID, transactionID)
-
 	if err := s.ReplicatePaymentToFollowers(payment); err != nil {
 		return nil, err
 	}
-
-	log.Printf("node %s replicated payment %s to followers", s.node.ID, transactionID)
 
 	return payment, nil
 }
@@ -139,8 +135,6 @@ func (s *Service) HandleReplicatedPayment(msg *types.Message) error {
 		}
 	}
 
-	log.Printf("node %s replicated payment %s", s.node.ID, transactionID)
-
 	payload := map[string]interface{}{
 		"transaction_id": transactionID,
 	}
@@ -198,7 +192,15 @@ func (s *Service) MarkCommitted(transactionID string) {
 	payment.Status = "committed"
 	_ = s.store.SavePayment(payment)
 
-	log.Printf("node %s committed payment %s", s.node.ID, transactionID)
+	log.Printf(
+		"COMMITTED | node=%s | txn=%s | amount=%.2f | owner=%s | status=%s | version=%d",
+		s.node.ID,
+		payment.TransactionID,
+		payment.Amount,
+		payment.OwnerID,
+		payment.Status,
+		payment.Version,
+	)
 }
 
 func (s *Service) BroadcastCommit(transactionID string) error {
@@ -272,7 +274,16 @@ func (s *Service) HandleCommitPayment(msg *types.Message) error {
 		return err
 	}
 
-	log.Printf("node %s committed replicated payment %s", s.node.ID, transactionID)
+	log.Printf(
+		"COMMITTED | node=%s | txn=%s | amount=%.2f | owner=%s | status=%s | version=%d",
+		s.node.ID,
+		payment.TransactionID,
+		payment.Amount,
+		payment.OwnerID,
+		payment.Status,
+		payment.Version,
+	)
+
 	return nil
 }
 

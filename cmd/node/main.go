@@ -109,6 +109,28 @@ func main() {
 		case types.MsgHeartbeat:
 			detector.HandleHeartbeat(msg)
 
+		case types.MsgLeaderChange:
+			leaderID, _ := msg.Payload["leader_id"].(string)
+			termFloat, _ := msg.Payload["term"].(float64)
+			term := int(termFloat)
+
+			node.Mu.Lock()
+			node.KnownLeader = leaderID
+			if node.ID == leaderID {
+				node.Role = types.RoleLeader
+			} else {
+				node.Role = types.RoleFollower
+			}
+			node.Mu.Unlock()
+
+			log.Printf(
+				"ROLE_CHANGE | node=%s | role=%s | leader=%s | term=%d",
+				node.ID,
+				node.Role,
+				leaderID,
+				term,
+			)
+
 		case types.MsgPaymentCreate:
 			if node.Role == types.RoleLeader {
 				transactionID, _ := msg.Payload["transaction_id"].(string)

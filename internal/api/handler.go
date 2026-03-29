@@ -115,6 +115,29 @@ func loadExistingDashboardLogs() []LogView {
 	return logs
 }
 
+func (h *Handler) notifyLeaderChange() {
+	client := transport.NewUDPClient()
+
+	for _, node := range h.state.nodes {
+		if node.Status != "Running" {
+			continue
+		}
+
+		payload := map[string]interface{}{
+			"leader_id": h.state.leader,
+			"term":      h.state.currentTerm,
+		}
+
+		data, err := types.NewMessage(types.MsgLeaderChange, "api_server", payload)
+		if err != nil {
+			continue
+		}
+
+		addr := "127.0.0.1:" + strconv.Itoa(node.Port)
+		_ = client.Send(addr, data)
+	}
+}
+
 func (h *Handler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		methodNotAllowed(w)
@@ -226,7 +249,7 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 		h.state.addLog("Payment " + req.TransactionID + " rejected: majority not available")
 		writeJSON(w, http.StatusConflict, ActionResponse{
 			Success: false,
-			Message: "cannot commit payment: majority not available",
+			Message: "cannot process payment: majority not available",
 		})
 		return
 	}
@@ -279,7 +302,7 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 		TransactionID: req.TransactionID,
 		Amount:        req.Amount,
 		Currency:      "USD",
-		Status:        "committed",
+		Status:        "pending",
 		Timestamp:     float64(time.Now().UnixNano()) / 1e9,
 		Version:       1,
 		OwnerID:       req.OwnerID,
@@ -287,14 +310,13 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.state.payments = append(h.state.payments, payment)
-	h.state.setLeaderAction("Created "+req.TransactionID, "Replicated "+req.TransactionID)
-	h.state.addLog(strings.ToUpper(h.state.leader) + " created payment " + req.TransactionID + " in term " + strconv.Itoa(h.state.currentTerm))
-	h.state.addLog("Followers replicated " + req.TransactionID)
-	h.state.addLog("Majority ACK received, " + req.TransactionID + " committed")
+	h.state.setLeaderAction("Processing "+req.TransactionID, "Waiting for commit")
+	h.state.addLog(strings.ToUpper(h.state.leader) + " received payment request " + req.TransactionID + " in term " + strconv.Itoa(h.state.currentTerm))
+	h.state.addLog("Payment " + req.TransactionID + " sent to leader for replication and commit")
 
-	writeJSON(w, http.StatusCreated, ActionResponse{
+	writeJSON(w, http.StatusAccepted, ActionResponse{
 		Success: true,
-		Message: "payment created successfully",
+		Message: "payment request sent to leader",
 	})
 }
 
@@ -358,6 +380,7 @@ func (h *Handler) FailNode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		h.notifyLeaderChange()
 		h.state.addLog(strings.ToUpper(nextLeader) + " became the new leader in term " + strconv.Itoa(h.state.currentTerm))
 		writeJSON(w, http.StatusOK, ActionResponse{
 			Success: true,
@@ -424,6 +447,8 @@ func (h *Handler) RejoinNode(w http.ResponseWriter, r *http.Request) {
 		node.Role = "Follower"
 	}
 	node.LastAction = "Recovered missing transactions"
+
+	h.notifyLeaderChange()
 
 	h.state.recoveryState = "Recovered"
 	h.state.addLog(strings.ToUpper(nodeID) + " rejoined the cluster in term " + strconv.Itoa(h.state.currentTerm))
