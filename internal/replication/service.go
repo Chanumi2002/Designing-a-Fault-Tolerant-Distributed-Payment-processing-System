@@ -193,13 +193,10 @@ func (s *Service) MarkCommitted(transactionID string) {
 	_ = s.store.SavePayment(payment)
 
 	log.Printf(
-		"COMMITTED | node=%s | txn=%s | amount=%.2f | owner=%s | status=%s | version=%d",
-		s.node.ID,
+		"txn=%s | amount=%.2f | owner=%s",
 		payment.TransactionID,
 		payment.Amount,
 		payment.OwnerID,
-		payment.Status,
-		payment.Version,
 	)
 }
 
@@ -275,13 +272,10 @@ func (s *Service) HandleCommitPayment(msg *types.Message) error {
 	}
 
 	log.Printf(
-		"COMMITTED | node=%s | txn=%s | amount=%.2f | owner=%s | status=%s | version=%d",
-		s.node.ID,
+		"txn=%s | amount=%.2f | owner=%s",
 		payment.TransactionID,
 		payment.Amount,
 		payment.OwnerID,
-		payment.Status,
-		payment.Version,
 	)
 
 	return nil

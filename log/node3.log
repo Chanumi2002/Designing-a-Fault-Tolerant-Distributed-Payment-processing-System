@@ -1,0 +1,6 @@
+2026/03/30 15:48:54 UDP server listening on 127.0.0.1:8003
+2026/03/30 15:49:16 txn=txn9504 | amount=450.00 | owner=user9500
+2026/03/30 15:49:40 txn=txn9503 | amount=450.00 | owner=user9500
+2026/03/30 15:50:00 txn=txn9509 | amount=450.00 | owner=user9501
+2026/03/30 15:50:33 txn=txn9506 | amount=450.00 | owner=user9500
+2026/03/30 15:50:47 txn=txn9500 | amount=450.00 | owner=user9500

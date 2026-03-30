@@ -1,0 +1,30 @@
+
+2026/03/30 15:49:01 Dashboard API server started
+2026/03/30 15:49:01 Node1 is the current leader in term 0
+2026/03/30 15:49:01 API server running at http://localhost:8080
+2026/03/30 15:49:01 Open http://localhost:8080/index.html
+2026/03/30 15:49:16 Payment txn9504 sent to leader
+2026/03/30 15:49:40 Payment txn9503 sent to leader
+2026/03/30 15:49:48 NODE1 failed
+2026/03/30 15:49:48 NODE1 was leader, triggering failover
+2026/03/30 15:49:48 NODE2 became the new leader in term 1
+2026/03/30 15:50:00 Payment txn9509 sent to leader
+2026/03/30 15:50:05 NODE2 failed
+2026/03/30 15:50:05 NODE2 was leader, triggering failover
+2026/03/30 15:50:05 NODE3 became the new leader in term 2
+2026/03/30 15:50:09 Payment txn9504 rejected: majority not available
+2026/03/30 15:50:17 Payment txn9506 rejected: majority not available
+2026/03/30 15:50:30 NODE2 rejoined the cluster in term 2
+2026/03/30 15:50:30 Recovery request sent for node2
+2026/03/30 15:50:30 Recovery applied for txn9504 on node2
+2026/03/30 15:50:30 Recovery applied for txn9503 on node2
+2026/03/30 15:50:30 Recovery applied for txn9509 on node2
+2026/03/30 15:50:33 Payment txn9506 sent to leader
+2026/03/30 15:50:47 Payment txn9500 sent to leader
+2026/03/30 15:50:55 NODE1 rejoined the cluster in term 2
+2026/03/30 15:50:55 Recovery request sent for node1
+2026/03/30 15:50:55 Recovery applied for txn9504 on node1
+2026/03/30 15:50:55 Recovery applied for txn9503 on node1
+2026/03/30 15:50:55 Recovery applied for txn9509 on node1
+2026/03/30 15:50:55 Recovery applied for txn9506 on node1
+2026/03/30 15:50:55 Recovery applied for txn9500 on node1

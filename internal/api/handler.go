@@ -57,6 +57,12 @@ type ActionResponse struct {
 	Message string `json:"message"`
 }
 
+type committedPaymentInfo struct {
+	TransactionID string
+	Amount        float64
+	OwnerID       string
+}
+
 type State struct {
 	mu            sync.RWMutex
 	leader        string
@@ -144,9 +150,8 @@ func (h *Handler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.state.mu.RLock()
-	defer h.state.mu.RUnlock()
-
+	h.state.mu.Lock()
+	h.state.syncPaymentsFromNodeLogs()
 	resp := DashboardResponse{
 		Leader:        h.state.leader,
 		Nodes:         cloneNodes(h.state.nodes),
@@ -157,6 +162,7 @@ func (h *Handler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 		Pending:       h.state.pendingCount(),
 		RecoveryState: h.state.recoveryState,
 	}
+	h.state.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -191,9 +197,11 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetPayments(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		h.state.mu.RLock()
-		defer h.state.mu.RUnlock()
-		writeJSON(w, http.StatusOK, clonePayments(h.state.payments))
+		h.state.mu.Lock()
+		h.state.syncPaymentsFromNodeLogs()
+		payments := clonePayments(h.state.payments)
+		h.state.mu.Unlock()
+		writeJSON(w, http.StatusOK, payments)
 	case http.MethodPost:
 		h.CreatePayment(w, r)
 	default:
@@ -236,6 +244,8 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 
 	h.state.mu.Lock()
 	defer h.state.mu.Unlock()
+
+	h.state.syncPaymentsFromNodeLogs()
 
 	if h.state.leader == "" {
 		writeJSON(w, http.StatusConflict, ActionResponse{
@@ -311,8 +321,7 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 
 	h.state.payments = append(h.state.payments, payment)
 	h.state.setLeaderAction("Processing "+req.TransactionID, "Waiting for commit")
-	h.state.addLog(strings.ToUpper(h.state.leader) + " received payment request " + req.TransactionID + " in term " + strconv.Itoa(h.state.currentTerm))
-	h.state.addLog("Payment " + req.TransactionID + " sent to leader for replication and commit")
+	h.state.addLog("Payment " + req.TransactionID + " sent to leader")
 
 	writeJSON(w, http.StatusAccepted, ActionResponse{
 		Success: true,
@@ -450,6 +459,7 @@ func (h *Handler) RejoinNode(w http.ResponseWriter, r *http.Request) {
 
 	h.notifyLeaderChange()
 
+	h.state.syncPaymentsFromNodeLogs()
 	h.state.recoveryState = "Recovered"
 	h.state.addLog(strings.ToUpper(nodeID) + " rejoined the cluster in term " + strconv.Itoa(h.state.currentTerm))
 	h.state.addLog("Recovery request sent for " + nodeID)
@@ -479,6 +489,102 @@ func (s *State) addLog(message string) {
 	if len(s.logs) > 200 {
 		s.logs = s.logs[len(s.logs)-200:]
 	}
+}
+
+func (s *State) syncPaymentsFromNodeLogs() {
+	committed := loadCommittedPaymentsFromNodeLogs()
+	if len(committed) == 0 {
+		return
+	}
+
+	existing := make(map[string]*types.PaymentEntry)
+	for _, payment := range s.payments {
+		existing[payment.TransactionID] = payment
+	}
+
+	for txnID, info := range committed {
+		if payment, ok := existing[txnID]; ok {
+			payment.Status = "committed"
+			if info.Amount > 0 {
+				payment.Amount = info.Amount
+			}
+			if info.OwnerID != "" {
+				payment.OwnerID = info.OwnerID
+			}
+			continue
+		}
+
+		s.payments = append(s.payments, &types.PaymentEntry{
+			TransactionID: info.TransactionID,
+			Amount:        info.Amount,
+			Currency:      "USD",
+			Status:        "committed",
+			Timestamp:     float64(time.Now().UnixNano()) / 1e9,
+			Version:       1,
+			OwnerID:       info.OwnerID,
+			StripeID:      "",
+		})
+	}
+}
+
+func loadCommittedPaymentsFromNodeLogs() map[string]committedPaymentInfo {
+	files := []string{"node1.log", "node2.log", "node3.log"}
+	committed := make(map[string]committedPaymentInfo)
+
+	for _, file := range files {
+		lines, err := utils.ReadPersistedLogs(file, 500)
+		if err != nil {
+			continue
+		}
+
+		for _, line := range lines {
+			info, ok := parseCommittedPaymentLog(line.Message)
+			if !ok {
+				continue
+			}
+			committed[info.TransactionID] = info
+		}
+	}
+
+	return committed
+}
+
+func parseCommittedPaymentLog(message string) (committedPaymentInfo, bool) {
+	parts := strings.Split(message, "|")
+	info := committedPaymentInfo{}
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+
+		key := strings.TrimSpace(strings.ToLower(kv[0]))
+		value := strings.TrimSpace(kv[1])
+
+		switch key {
+		case "txn":
+			info.TransactionID = value
+		case "amount":
+			amount, err := strconv.ParseFloat(value, 64)
+			if err == nil {
+				info.Amount = amount
+			}
+		case "owner":
+			info.OwnerID = value
+		}
+	}
+
+	if info.TransactionID == "" {
+		return committedPaymentInfo{}, false
+	}
+
+	return info, true
 }
 
 func (s *State) nodesActiveText() string {

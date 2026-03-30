@@ -111,8 +111,6 @@ func main() {
 
 		case types.MsgLeaderChange:
 			leaderID, _ := msg.Payload["leader_id"].(string)
-			termFloat, _ := msg.Payload["term"].(float64)
-			term := int(termFloat)
 
 			node.Mu.Lock()
 			node.KnownLeader = leaderID
@@ -122,14 +120,6 @@ func main() {
 				node.Role = types.RoleFollower
 			}
 			node.Mu.Unlock()
-
-			log.Printf(
-				"ROLE_CHANGE | node=%s | role=%s | leader=%s | term=%d",
-				node.ID,
-				node.Role,
-				leaderID,
-				term,
-			)
 
 		case types.MsgPaymentCreate:
 			if node.Role == types.RoleLeader {
@@ -173,9 +163,7 @@ func main() {
 
 		case types.MsgRecoveryRequest:
 			if node.Role == types.RoleLeader {
-				if err := recovery.HandleRecoveryRequest(msg); err != nil {
-					log.Println("handle recovery request error:", err)
-				}
+				_ = recovery.HandleRecoveryRequest(msg)
 			}
 
 		case types.MsgRecoveryData:
@@ -194,15 +182,9 @@ func main() {
 	go func() {
 		time.Sleep(3 * time.Second)
 		if node.Role == types.RoleFollower {
-			if err := recovery.RequestRecovery(); err != nil {
-				log.Println("recovery request error:", err)
-			}
+			_ = recovery.RequestRecovery()
 		}
 	}()
-
-	log.Printf("===== %s START =====", strings.ToUpper(node.ID))
-	log.Printf("node %s started on %s as %s\n", node.ID, address, node.Role)
-	log.Printf("node %s writing logs to log/%s.log\n", node.ID, node.ID)
 
 	select {}
 }
