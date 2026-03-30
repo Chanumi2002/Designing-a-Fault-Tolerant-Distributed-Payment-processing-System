@@ -121,6 +121,26 @@ func loadExistingDashboardLogs() []LogView {
 	return logs
 }
 
+func sendControlMessage(node NodeView, msgType string) {
+	client := transport.NewUDPClient()
+
+	payload := map[string]interface{}{
+		"node_id": node.ID,
+	}
+
+	data, err := types.NewMessage(msgType, "api_server", payload)
+	if err != nil {
+		return
+	}
+
+	addr := "127.0.0.1:" + strconv.Itoa(node.Port)
+
+	for i := 0; i < 5; i++ {
+		_ = client.Send(addr, data)
+		time.Sleep(60 * time.Millisecond)
+	}
+}
+
 func (h *Handler) notifyLeaderChange() {
 	client := transport.NewUDPClient()
 
@@ -375,6 +395,8 @@ func (h *Handler) FailNode(w http.ResponseWriter, r *http.Request) {
 
 	wasLeader := h.state.leader == nodeID
 
+	sendControlMessage(*node, types.MsgNodeFail)
+
 	h.state.markNodeFailed(nodeID)
 	h.state.addLog(strings.ToUpper(nodeID) + " failed")
 
@@ -448,6 +470,8 @@ func (h *Handler) RejoinNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sendControlMessage(*node, types.MsgNodeRejoin)
+
 	node.Status = "Running"
 	node.CurrentTerm = h.state.currentTerm
 	if h.state.leader == nodeID {
@@ -455,22 +479,13 @@ func (h *Handler) RejoinNode(w http.ResponseWriter, r *http.Request) {
 	} else {
 		node.Role = "Follower"
 	}
-	node.LastAction = "Recovered missing transactions"
+	node.LastAction = "Recovery requested"
 
 	h.notifyLeaderChange()
 
-	h.state.syncPaymentsFromNodeLogs()
 	h.state.recoveryState = "Recovered"
 	h.state.addLog(strings.ToUpper(nodeID) + " rejoined the cluster in term " + strconv.Itoa(h.state.currentTerm))
 	h.state.addLog("Recovery request sent for " + nodeID)
-
-	if len(h.state.payments) == 0 {
-		h.state.addLog("Recovery completed for " + nodeID + ", no payments were missing")
-	} else {
-		for _, p := range h.state.payments {
-			h.state.addLog("Recovery applied for " + p.TransactionID + " on " + nodeID)
-		}
-	}
 
 	writeJSON(w, http.StatusOK, ActionResponse{
 		Success: true,
@@ -492,7 +507,7 @@ func (s *State) addLog(message string) {
 }
 
 func (s *State) syncPaymentsFromNodeLogs() {
-	committed := loadCommittedPaymentsFromNodeLogs()
+	committed := loadCommittedPaymentsFromNodeLogs(s.runningNodeLogFiles())
 	if len(committed) == 0 {
 		return
 	}
@@ -527,8 +542,21 @@ func (s *State) syncPaymentsFromNodeLogs() {
 	}
 }
 
-func loadCommittedPaymentsFromNodeLogs() map[string]committedPaymentInfo {
-	files := []string{"node1.log", "node2.log", "node3.log"}
+func (s *State) runningNodeLogFiles() []string {
+	files := make([]string, 0, len(s.nodes))
+
+	for _, node := range s.nodes {
+		if node.Status != "Running" {
+			continue
+		}
+
+		files = append(files, node.ID+".log")
+	}
+
+	return files
+}
+
+func loadCommittedPaymentsFromNodeLogs(files []string) map[string]committedPaymentInfo {
 	committed := make(map[string]committedPaymentInfo)
 
 	for _, file := range files {

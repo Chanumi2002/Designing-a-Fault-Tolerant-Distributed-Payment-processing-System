@@ -43,18 +43,72 @@ function money(value) {
   return `$${Number(value).toFixed(2)}`;
 }
 
+function getLatestCommittedPayment(payments) {
+  if (!Array.isArray(payments) || payments.length === 0) {
+    return null;
+  }
+
+  const committedPayments = payments.filter(
+    (payment) => payment && payment.Status && payment.Status.toLowerCase() === "committed"
+  );
+
+  if (!committedPayments.length) {
+    return null;
+  }
+
+  committedPayments.sort((a, b) => {
+    const timeA = Number(a.Timestamp || 0);
+    const timeB = Number(b.Timestamp || 0);
+    return timeB - timeA;
+  });
+
+  return committedPayments[0];
+}
+
+function getDisplayAction(node, leader, payments) {
+  if (!node) {
+    return "";
+  }
+
+  if (node.status === "Failed") {
+    return "Node unavailable";
+  }
+
+  const latestCommitted = getLatestCommittedPayment(payments);
+  const rawAction = (node.lastAction || "").trim();
+
+  if (node.id === leader) {
+    if (latestCommitted && rawAction.toLowerCase().startsWith("processing")) {
+      return `Committed ${latestCommitted.TransactionID}`;
+    }
+    return rawAction || "Leader active";
+  }
+
+  if (latestCommitted) {
+    if (
+      rawAction === "" ||
+      rawAction.toLowerCase() === "waiting for commit" ||
+      rawAction.toLowerCase().startsWith("waiting for commit")
+    ) {
+      return `Committed ${latestCommitted.TransactionID}`;
+    }
+  }
+
+  return rawAction || "Follower synced";
+}
+
 function renderLeader(leader) {
   currentLeader.textContent = leader ? leader.toUpperCase() : "NONE";
 }
 
-function renderNodes(nodes, leader) {
+function renderNodes(nodes, leader, payments) {
   Object.keys(nodeCards).forEach((nodeId) => {
     nodeCards[nodeId].classList.remove("leader", "follower", "failed");
   });
 
   nodes.forEach((node) => {
     nodeStatus[node.id].textContent = node.status;
-    nodeAction[node.id].textContent = node.lastAction;
+    nodeAction[node.id].textContent = getDisplayAction(node, leader, payments);
     nodeRoles[node.id].textContent = node.role;
 
     if (nodeTerm[node.id]) {
@@ -157,9 +211,9 @@ async function loadDashboard() {
     const data = await res.json();
 
     renderLeader(data.leader);
-    renderNodes(data.nodes, data.leader);
-    renderPayments(data.payments);
-    renderLogs(data.logs);
+    renderNodes(data.nodes, data.leader, data.payments || []);
+    renderPayments(data.payments || []);
+    renderLogs(data.logs || []);
     renderStats(data);
   } catch (err) {
     formMessage.textContent = "Failed to load dashboard data.";

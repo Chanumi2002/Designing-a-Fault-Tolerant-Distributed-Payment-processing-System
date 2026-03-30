@@ -1,6 +1,7 @@
 package fault
 
 import (
+	"log"
 	"net"
 	"strconv"
 
@@ -24,7 +25,12 @@ func NewRecoveryManager(node *types.Node, cfg *config.Config, sender PeerSender)
 
 func (r *RecoveryManager) RequestRecovery() error {
 	r.Node.Mu.RLock()
+	if !r.Node.IsActive || r.Node.Status == types.StatusFailed {
+		r.Node.Mu.RUnlock()
+		return nil
+	}
 	leaderID := r.Node.KnownLeader
+	currentCount := len(r.Node.Payments)
 	r.Node.Mu.RUnlock()
 
 	if leaderID == "" {
@@ -35,10 +41,6 @@ func (r *RecoveryManager) RequestRecovery() error {
 	if !ok {
 		return nil
 	}
-
-	r.Node.Mu.RLock()
-	currentCount := len(r.Node.Payments)
-	r.Node.Mu.RUnlock()
 
 	payload := map[string]interface{}{
 		"node_id":       r.Node.ID,
@@ -59,6 +61,13 @@ func (r *RecoveryManager) HandleRecoveryRequest(msg *types.Message) error {
 		return nil
 	}
 
+	r.Node.Mu.RLock()
+	if !r.Node.IsActive || r.Node.Status == types.StatusFailed {
+		r.Node.Mu.RUnlock()
+		return nil
+	}
+	r.Node.Mu.RUnlock()
+
 	targetNodeID, ok := msg.Payload["node_id"].(string)
 	if !ok || targetNodeID == "" {
 		return nil
@@ -72,6 +81,10 @@ func (r *RecoveryManager) HandleRecoveryRequest(msg *types.Message) error {
 	r.Node.Mu.RLock()
 	payments := make([]map[string]interface{}, 0, len(r.Node.Payments))
 	for _, p := range r.Node.Payments {
+		if p == nil || p.Status != "committed" {
+			continue
+		}
+
 		payments = append(payments, map[string]interface{}{
 			"transaction_id": p.TransactionID,
 			"amount":         p.Amount,
@@ -103,6 +116,13 @@ func (r *RecoveryManager) HandleRecoveryData(msg *types.Message) {
 		return
 	}
 
+	r.Node.Mu.RLock()
+	if !r.Node.IsActive || r.Node.Status == types.StatusFailed {
+		r.Node.Mu.RUnlock()
+		return
+	}
+	r.Node.Mu.RUnlock()
+
 	rawPayments, ok := msg.Payload["payments"].([]interface{})
 	if !ok {
 		return
@@ -129,19 +149,43 @@ func (r *RecoveryManager) HandleRecoveryData(msg *types.Message) {
 		versionFloat, _ := record["version"].(float64)
 		version := int(versionFloat)
 
-		if transactionID == "" {
+		if transactionID == "" || status != "committed" {
 			continue
 		}
 
-		r.Node.Payments[transactionID] = &types.PaymentEntry{
-			TransactionID: transactionID,
-			Amount:        amount,
-			Currency:      currency,
-			Status:        status,
-			Timestamp:     timestamp,
-			Version:       version,
-			OwnerID:       ownerID,
-			StripeID:      stripeID,
+		existing, exists := r.Node.Payments[transactionID]
+		shouldLog := false
+
+		if !exists {
+			r.Node.Payments[transactionID] = &types.PaymentEntry{
+				TransactionID: transactionID,
+				Amount:        amount,
+				Currency:      currency,
+				Status:        status,
+				Timestamp:     timestamp,
+				Version:       version,
+				OwnerID:       ownerID,
+				StripeID:      stripeID,
+			}
+			shouldLog = true
+		} else if existing.Status != "committed" {
+			existing.Amount = amount
+			existing.Currency = currency
+			existing.Status = "committed"
+			existing.Timestamp = timestamp
+			existing.Version = version
+			existing.OwnerID = ownerID
+			existing.StripeID = stripeID
+			shouldLog = true
+		}
+
+		if shouldLog {
+			log.Printf(
+				"txn=%s | amount=%.2f | owner=%s",
+				transactionID,
+				amount,
+				ownerID,
+			)
 		}
 	}
 }

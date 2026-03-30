@@ -20,6 +20,8 @@ const (
 	MsgPaymentAck       = "PAYMENT_ACK"
 	MsgPaymentCommit    = "PAYMENT_COMMIT"
 	MsgLeaderChange     = "LEADER_CHANGE"
+	MsgNodeFail         = "NODE_FAIL"
+	MsgNodeRejoin       = "NODE_REJOIN"
 )
 
 type Message struct {

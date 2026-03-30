@@ -39,7 +39,31 @@ func NewService(store storage.Store, node *types.Node, cfg *config.Config, sende
 	}
 }
 
+func (s *Service) isNodeActive() bool {
+	s.node.Mu.RLock()
+	defer s.node.Mu.RUnlock()
+
+	return s.node.IsActive && s.node.Status != types.StatusFailed
+}
+
+func (s *Service) logCommittedPayment(payment *types.PaymentEntry) {
+	if payment == nil {
+		return
+	}
+
+	log.Printf(
+		"txn=%s | amount=%.2f | owner=%s",
+		payment.TransactionID,
+		payment.Amount,
+		payment.OwnerID,
+	)
+}
+
 func (s *Service) CreatePayment(transactionID string, amount float64, ownerID string) (*types.PaymentEntry, error) {
+	if !s.isNodeActive() {
+		return nil, nil
+	}
+
 	if s.store.HasPayment(transactionID) {
 		return nil, ErrDuplicatePayment
 	}
@@ -71,6 +95,10 @@ func (s *Service) CreatePayment(transactionID string, amount float64, ownerID st
 }
 
 func (s *Service) ReplicatePaymentToFollowers(payment *types.PaymentEntry) error {
+	if !s.isNodeActive() {
+		return nil
+	}
+
 	peers := s.config.PeersExcluding(s.node.ID)
 
 	for _, peer := range peers {
@@ -98,6 +126,10 @@ func (s *Service) ReplicatePaymentToFollowers(payment *types.PaymentEntry) error
 }
 
 func (s *Service) HandleReplicatedPayment(msg *types.Message) error {
+	if !s.isNodeActive() {
+		return nil
+	}
+
 	if msg == nil {
 		return nil
 	}
@@ -153,6 +185,10 @@ func (s *Service) HandleReplicatedPayment(msg *types.Message) error {
 }
 
 func (s *Service) HandlePaymentAck(msg *types.Message) {
+	if !s.isNodeActive() {
+		return
+	}
+
 	if msg == nil {
 		return
 	}
@@ -184,23 +220,29 @@ func (s *Service) HasMajority(transactionID string) bool {
 }
 
 func (s *Service) MarkCommitted(transactionID string) {
+	if !s.isNodeActive() {
+		return
+	}
+
 	payment, ok := s.store.GetPayment(transactionID)
 	if !ok {
 		return
 	}
 
+	if payment.Status == "committed" {
+		return
+	}
+
 	payment.Status = "committed"
 	_ = s.store.SavePayment(payment)
-
-	log.Printf(
-		"txn=%s | amount=%.2f | owner=%s",
-		payment.TransactionID,
-		payment.Amount,
-		payment.OwnerID,
-	)
+	s.logCommittedPayment(payment)
 }
 
 func (s *Service) BroadcastCommit(transactionID string) error {
+	if !s.isNodeActive() {
+		return nil
+	}
+
 	payment, ok := s.store.GetPayment(transactionID)
 	if !ok {
 		return nil
@@ -233,6 +275,10 @@ func (s *Service) BroadcastCommit(transactionID string) error {
 }
 
 func (s *Service) HandleCommitPayment(msg *types.Message) error {
+	if !s.isNodeActive() {
+		return nil
+	}
+
 	if msg == nil {
 		return nil
 	}
@@ -243,6 +289,8 @@ func (s *Service) HandleCommitPayment(msg *types.Message) error {
 	}
 
 	payment, ok := s.store.GetPayment(transactionID)
+	shouldLog := false
+
 	if !ok {
 		currency, _ := msg.Payload["currency"].(string)
 		status, _ := msg.Payload["status"].(string)
@@ -263,20 +311,21 @@ func (s *Service) HandleCommitPayment(msg *types.Message) error {
 			OwnerID:       ownerID,
 			StripeID:      stripeID,
 		}
+		shouldLog = payment.Status == "committed"
 	} else {
-		payment.Status = "committed"
+		if payment.Status != "committed" {
+			payment.Status = "committed"
+			shouldLog = true
+		}
 	}
 
 	if err := s.store.SavePayment(payment); err != nil {
 		return err
 	}
 
-	log.Printf(
-		"txn=%s | amount=%.2f | owner=%s",
-		payment.TransactionID,
-		payment.Amount,
-		payment.OwnerID,
-	)
+	if shouldLog {
+		s.logCommittedPayment(payment)
+	}
 
 	return nil
 }
@@ -290,6 +339,10 @@ func (s *Service) GetAllPayments() []*types.PaymentEntry {
 }
 
 func (s *Service) ApplyRecoveredPayment(payment *types.PaymentEntry) error {
+	if !s.isNodeActive() {
+		return nil
+	}
+
 	if payment == nil || payment.TransactionID == "" {
 		return nil
 	}

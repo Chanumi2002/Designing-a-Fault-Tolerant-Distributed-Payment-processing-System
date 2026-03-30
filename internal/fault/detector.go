@@ -56,14 +56,26 @@ func (d *Detector) StartHeartbeatLoop() {
 }
 
 func (d *Detector) sendHeartbeats() {
+	d.Node.Mu.RLock()
+	if !d.Node.IsActive || d.Node.Status == types.StatusFailed {
+		d.Node.Mu.RUnlock()
+		return
+	}
+
+	role := d.Node.Role
+	leader := d.Node.KnownLeader
+	host := d.Node.Host
+	port := d.Node.Port
+	d.Node.Mu.RUnlock()
+
 	peers := d.Config.PeersExcluding(d.Node.ID)
 
 	for _, peer := range peers {
 		payload := map[string]interface{}{
-			"role":   string(d.Node.Role),
-			"leader": d.Node.KnownLeader,
-			"host":   d.Node.Host,
-			"port":   d.Node.Port,
+			"role":   string(role),
+			"leader": leader,
+			"host":   host,
+			"port":   port,
 		}
 
 		data, err := types.NewMessage(types.MsgHeartbeat, d.Node.ID, payload)
@@ -80,6 +92,13 @@ func (d *Detector) HandleHeartbeat(msg *types.Message) {
 	if msg == nil {
 		return
 	}
+
+	d.Node.Mu.RLock()
+	if !d.Node.IsActive || d.Node.Status == types.StatusFailed {
+		d.Node.Mu.RUnlock()
+		return
+	}
+	d.Node.Mu.RUnlock()
 
 	d.Node.Mu.Lock()
 	d.Node.LastHeartbeat[msg.Sender] = time.Now()
@@ -109,6 +128,13 @@ func (d *Detector) StartFailureMonitor() {
 }
 
 func (d *Detector) checkFailures() {
+	d.Node.Mu.RLock()
+	if !d.Node.IsActive || d.Node.Status == types.StatusFailed {
+		d.Node.Mu.RUnlock()
+		return
+	}
+	d.Node.Mu.RUnlock()
+
 	timeout := time.Duration(d.Config.HeartbeatTimeout) * time.Second
 	now := time.Now()
 

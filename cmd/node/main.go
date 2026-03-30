@@ -66,6 +66,37 @@ func (s *nodeStore) GetAllPayments() []*types.PaymentEntry {
 	return result
 }
 
+func isLeader(node *types.Node) bool {
+	node.Mu.RLock()
+	defer node.Mu.RUnlock()
+
+	return node.Role == types.RoleLeader && node.IsActive && node.Status != types.StatusFailed
+}
+
+func setNodeFailed(node *types.Node) {
+	node.Mu.Lock()
+	defer node.Mu.Unlock()
+
+	node.IsActive = false
+	node.Status = types.StatusFailed
+	node.Role = types.RoleFollower
+}
+
+func setNodeRejoined(node *types.Node) {
+	node.Mu.Lock()
+	defer node.Mu.Unlock()
+
+	node.IsActive = true
+	node.Status = types.StatusAlive
+
+	if node.KnownLeader == "" || node.KnownLeader == node.ID {
+		node.Role = types.RoleLeader
+		node.KnownLeader = node.ID
+	} else {
+		node.Role = types.RoleFollower
+	}
+}
+
 func main() {
 	cfg := config.Load()
 
@@ -87,6 +118,8 @@ func main() {
 	}
 
 	node := types.NewNode(nodeCfg.ID, nodeCfg.Host, nodeCfg.Port)
+	node.Status = types.StatusAlive
+	node.IsActive = true
 
 	if node.ID == "node1" {
 		node.Role = types.RoleLeader
@@ -106,6 +139,17 @@ func main() {
 
 	server := transport.NewUDPServer(address, func(msg *types.Message) {
 		switch msg.Type {
+		case types.MsgNodeFail:
+			setNodeFailed(node)
+
+		case types.MsgNodeRejoin:
+			setNodeRejoined(node)
+
+			go func() {
+				time.Sleep(300 * time.Millisecond)
+				_ = recovery.RequestRecovery()
+			}()
+
 		case types.MsgHeartbeat:
 			detector.HandleHeartbeat(msg)
 
@@ -122,7 +166,7 @@ func main() {
 			node.Mu.Unlock()
 
 		case types.MsgPaymentCreate:
-			if node.Role == types.RoleLeader {
+			if isLeader(node) {
 				transactionID, _ := msg.Payload["transaction_id"].(string)
 				ownerID, _ := msg.Payload["owner_id"].(string)
 				amount, _ := msg.Payload["amount"].(float64)
@@ -162,7 +206,7 @@ func main() {
 			_ = replicationService.HandleCommitPayment(msg)
 
 		case types.MsgRecoveryRequest:
-			if node.Role == types.RoleLeader {
+			if isLeader(node) {
 				_ = recovery.HandleRecoveryRequest(msg)
 			}
 
@@ -181,7 +225,12 @@ func main() {
 
 	go func() {
 		time.Sleep(3 * time.Second)
-		if node.Role == types.RoleFollower {
+
+		node.Mu.RLock()
+		shouldRecover := node.Role == types.RoleFollower && node.IsActive && node.Status != types.StatusFailed
+		node.Mu.RUnlock()
+
+		if shouldRecover {
 			_ = recovery.RequestRecovery()
 		}
 	}()

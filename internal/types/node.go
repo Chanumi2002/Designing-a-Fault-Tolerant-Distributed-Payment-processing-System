@@ -16,16 +16,17 @@ const (
 )
 
 type Node struct {
-	ID              string
-	Host            string
-	Port            int
-	Status          NodeStatus
-	Role            NodeRole
-	ClockOffset     float64
-	Payments        map[string]*PaymentEntry
-	LastHeartbeat   map[string]time.Time
-	KnownLeader     string
-	Mu              sync.RWMutex
+	ID            string
+	Host          string
+	Port          int
+	Status        NodeStatus
+	Role          NodeRole
+	ClockOffset   float64
+	Payments      map[string]*PaymentEntry
+	LastHeartbeat map[string]time.Time
+	KnownLeader   string
+	IsActive      bool
+	Mu            sync.RWMutex
 }
 
 func NewNode(id, host string, port int) *Node {
@@ -37,5 +38,6 @@ func NewNode(id, host string, port int) *Node {
 		Role:          RoleFollower,
 		Payments:      make(map[string]*PaymentEntry),
 		LastHeartbeat: make(map[string]time.Time),
+		IsActive:      true,
 	}
 }
