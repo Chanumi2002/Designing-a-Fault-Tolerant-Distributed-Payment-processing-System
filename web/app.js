@@ -74,6 +74,10 @@ function getDisplayAction(node, leader, payments) {
     return "Node unavailable";
   }
 
+  if (node.status === "Offline") {
+    return "Node not started";
+  }
+
   const latestCommitted = getLatestCommittedPayment(payments);
   const rawAction = (node.lastAction || "").trim();
 
@@ -103,7 +107,7 @@ function renderLeader(leader) {
 
 function renderNodes(nodes, leader, payments) {
   Object.keys(nodeCards).forEach((nodeId) => {
-    nodeCards[nodeId].classList.remove("leader", "follower", "failed");
+    nodeCards[nodeId].classList.remove("leader", "follower", "failed", "offline");
   });
 
   nodes.forEach((node) => {
@@ -116,6 +120,12 @@ function renderNodes(nodes, leader, payments) {
     }
 
     if (node.status === "Failed") {
+      nodeCards[node.id].classList.add("failed");
+      nodeRoles[node.id].className = "badge warning-badge";
+      return;
+    }
+
+    if (node.status === "Offline") {
       nodeCards[node.id].classList.add("failed");
       nodeRoles[node.id].className = "badge warning-badge";
       return;
@@ -150,7 +160,7 @@ function syncNodeButtons(nodes) {
     }
 
     if (action === "fail") {
-      button.disabled = node.status === "Failed";
+      button.disabled = node.status === "Failed" || node.status === "Offline";
       return;
     }
 

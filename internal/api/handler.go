@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -87,20 +88,26 @@ func newState() *State {
 	existingLogs := loadExistingDashboardLogs()
 
 	s := &State{
-		leader:      "node1",
+		leader:      "",
 		currentTerm: 0,
 		nodes: []NodeView{
-			{ID: "node1", Role: "Leader", Status: "Running", Port: 8001, LastAction: "Cluster initialized", CurrentTerm: 0},
-			{ID: "node2", Role: "Follower", Status: "Running", Port: 8002, LastAction: "Waiting for leader", CurrentTerm: 0},
-			{ID: "node3", Role: "Follower", Status: "Running", Port: 8003, LastAction: "Waiting for leader", CurrentTerm: 0},
+			{ID: "node1", Role: "Offline", Status: "Offline", Port: 8001, LastAction: "Node not started", CurrentTerm: 0},
+			{ID: "node2", Role: "Offline", Status: "Offline", Port: 8002, LastAction: "Node not started", CurrentTerm: 0},
+			{ID: "node3", Role: "Offline", Status: "Offline", Port: 8003, LastAction: "Node not started", CurrentTerm: 0},
 		},
 		payments:      []*types.PaymentEntry{},
 		logs:          existingLogs,
 		recoveryState: "Stable",
 	}
 
-	s.addLog("Dashboard API server started")
-	s.addLog("Node1 is the current leader in term 0")
+	s.refreshNodeStartupState()
+	if s.leader != "" {
+		s.addLog(strings.ToUpper(s.leader) + " detected as current leader at startup")
+	} else {
+		s.addLog("Dashboard API server started")
+		s.addLog("No active nodes detected yet")
+	}
+
 	return s
 }
 
@@ -171,7 +178,9 @@ func (h *Handler) GetDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.state.mu.Lock()
+	h.state.refreshNodeStartupState()
 	h.state.syncPaymentsFromNodeLogs()
+
 	resp := DashboardResponse{
 		Leader:        h.state.leader,
 		Nodes:         cloneNodes(h.state.nodes),
@@ -193,8 +202,9 @@ func (h *Handler) GetLeader(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.state.mu.RLock()
-	defer h.state.mu.RUnlock()
+	h.state.mu.Lock()
+	h.state.refreshNodeStartupState()
+	defer h.state.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"leader":      h.state.leader,
@@ -208,16 +218,19 @@ func (h *Handler) GetNodes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.state.mu.RLock()
-	defer h.state.mu.RUnlock()
+	h.state.mu.Lock()
+	h.state.refreshNodeStartupState()
+	nodes := cloneNodes(h.state.nodes)
+	h.state.mu.Unlock()
 
-	writeJSON(w, http.StatusOK, cloneNodes(h.state.nodes))
+	writeJSON(w, http.StatusOK, nodes)
 }
 
 func (h *Handler) GetPayments(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		h.state.mu.Lock()
+		h.state.refreshNodeStartupState()
 		h.state.syncPaymentsFromNodeLogs()
 		payments := clonePayments(h.state.payments)
 		h.state.mu.Unlock()
@@ -265,6 +278,7 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	h.state.mu.Lock()
 	defer h.state.mu.Unlock()
 
+	h.state.refreshNodeStartupState()
 	h.state.syncPaymentsFromNodeLogs()
 
 	if h.state.leader == "" {
@@ -295,10 +309,10 @@ func (h *Handler) CreatePayment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	leaderNode := h.state.findNode(h.state.leader)
-	if leaderNode == nil {
+	if leaderNode == nil || leaderNode.Status != "Running" {
 		writeJSON(w, http.StatusConflict, ActionResponse{
 			Success: false,
-			Message: "leader node not found",
+			Message: "leader node not available",
 		})
 		return
 	}
@@ -376,11 +390,21 @@ func (h *Handler) FailNode(w http.ResponseWriter, r *http.Request) {
 	h.state.mu.Lock()
 	defer h.state.mu.Unlock()
 
+	h.state.refreshNodeStartupState()
+
 	node := h.state.findNode(nodeID)
 	if node == nil {
 		writeJSON(w, http.StatusNotFound, ActionResponse{
 			Success: false,
 			Message: "node not found",
+		})
+		return
+	}
+
+	if node.Status == "Offline" {
+		writeJSON(w, http.StatusConflict, ActionResponse{
+			Success: false,
+			Message: nodeID + " is not started",
 		})
 		return
 	}
@@ -458,6 +482,14 @@ func (h *Handler) RejoinNode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, ActionResponse{
 			Success: false,
 			Message: "node not found",
+		})
+		return
+	}
+
+	if node.Status == "Offline" {
+		writeJSON(w, http.StatusConflict, ActionResponse{
+			Success: false,
+			Message: nodeID + " is not started yet. Run the node command first.",
 		})
 		return
 	}
@@ -615,6 +647,103 @@ func parseCommittedPaymentLog(message string) (committedPaymentInfo, bool) {
 	return info, true
 }
 
+func (s *State) refreshNodeStartupState() {
+	for i := range s.nodes {
+		node := &s.nodes[i]
+
+		if node.Status == "Failed" {
+			continue
+		}
+
+		if hasNodeStarted(node.ID) {
+			if node.Status == "Offline" {
+				node.Status = "Running"
+				node.LastAction = "Node started"
+				node.CurrentTerm = 0
+			}
+
+			if node.Role == "Offline" {
+				node.Role = "Follower"
+			}
+		} else {
+			node.Status = "Offline"
+			node.Role = "Offline"
+			node.LastAction = "Node not started"
+			node.CurrentTerm = 0
+		}
+	}
+
+	s.recalculateLeaderFromRunningNodes()
+}
+
+func hasNodeStarted(nodeID string) bool {
+	filename := nodeID + ".log"
+	path := utils.GetLogFilePath(filename)
+
+	if _, err := os.Stat(path); err != nil {
+		return false
+	}
+
+	lines, err := utils.ReadPersistedLogs(filename, 50)
+	if err != nil || len(lines) == 0 {
+		return false
+	}
+
+	for _, line := range lines {
+		msg := strings.ToLower(line.Message)
+		if strings.Contains(msg, "udp server listening") || strings.Contains(msg, "node "+strings.ToLower(nodeID)+" listening") {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (s *State) recalculateLeaderFromRunningNodes() {
+	running := make([]int, 0)
+
+	for i := range s.nodes {
+		if s.nodes[i].Status == "Running" {
+			running = append(running, i)
+		}
+	}
+
+	if len(running) == 0 {
+		s.leader = ""
+		return
+	}
+
+	if s.leader != "" {
+		for _, idx := range running {
+			if s.nodes[idx].ID == s.leader {
+				s.nodes[idx].Role = "Leader"
+				for _, j := range running {
+					if j != idx {
+						s.nodes[j].Role = "Follower"
+					}
+				}
+				return
+			}
+		}
+	}
+
+	order := []string{"node1", "node2", "node3"}
+	for _, id := range order {
+		for _, idx := range running {
+			if s.nodes[idx].ID == id {
+				s.leader = id
+				s.nodes[idx].Role = "Leader"
+				for _, j := range running {
+					if j != idx {
+						s.nodes[j].Role = "Follower"
+					}
+				}
+				return
+			}
+		}
+	}
+}
+
 func (s *State) nodesActiveText() string {
 	active := s.runningNodesCount()
 	return itoa(active) + " / " + itoa(len(s.nodes))
@@ -657,18 +786,19 @@ func (s *State) pendingCount() int {
 
 func (s *State) setLeaderAction(leaderAction, followerAction string) {
 	for i := range s.nodes {
+		if s.nodes[i].Status != "Running" {
+			continue
+		}
+
 		switch s.nodes[i].ID {
 		case s.leader:
 			s.nodes[i].LastAction = leaderAction
 			s.nodes[i].Role = "Leader"
-			s.nodes[i].Status = "Running"
 			s.nodes[i].CurrentTerm = s.currentTerm
 		default:
-			if s.nodes[i].Status == "Running" {
-				s.nodes[i].Role = "Follower"
-				s.nodes[i].LastAction = followerAction
-				s.nodes[i].CurrentTerm = s.currentTerm
-			}
+			s.nodes[i].Role = "Follower"
+			s.nodes[i].LastAction = followerAction
+			s.nodes[i].CurrentTerm = s.currentTerm
 		}
 	}
 }
